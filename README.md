@@ -2,14 +2,43 @@
 
 针对 **小米电视 MiTV4A 43 中国版，codename `matrix`，Android 6.0.1 / API 23** 的实机改造项目。
 
-目标很明确：**不 root、不刷机、不改 `/system`，把老电视改成一个干净、可控、能自定义壁纸的首页，同时保留原厂系统作为兜底。**
+目标：**不 root、不刷机、不改 `/system`，把老电视改成一个干净、可控、支持自定义壁纸且 Home 键可长期稳定接管的首页，同时保留原厂系统作为救援层。**
 
-> 状态：`v1.0.0`，在一台 MiTV4A 43 / `matrix` / build `8.8.20.1275` 上完成实机验证。
-> 这不是“所有小米电视通用脚本”。型号或系统版本不同，先做识别，不要直接执行删除脚本。
+> 当前稳定版：**v1.1.0**  
+> 实机：MiTV4A 43 / `matrix` / Android 6.0.1 / build `8.8.20.1275`。  
+> 这不是“小米电视通用 Debloat 清单”。型号或 ROM 不同，不要直接执行删除脚本。
+
+## v1.1.0 最重要的变化
+
+v1.0.0 的 `HomeKeyService` 已经可以接管物理 Home 键，但这台 Xiaomi Android 6 ROM 有一个麻烦的状态：APK 更新、`force-stop` 或某些重启流程后，`enabled_accessibility_services` 里可能还写着 `HomeKeyService`，实际服务却没有有效绑定，结果 Home 键又回到小米桌面。
+
+v1.1.0 增加 **HomeGuard 自愈层**：
+
+```text
+Launcher / 开机 / APK 覆盖升级
+        ↓
+HomeGuard 检查 HomeKeyService
+        ↓
+保留其它无障碍服务
+        ↓
+只重置并重新加入自己的 HomeKeyService
+        ↓
+Home 键继续回自定义 Launcher
+```
+
+最终已通过三项关键实机测试：
+
+```text
+SmartTube 中按 Home                   PASS
+电视完整重启后按 Home               PASS
+adb install -r 覆盖升级后再按 Home   PASS
+```
+
+最后一项测试中**没有手工恢复无障碍服务**。
+
+详见 [`patches/HOME_GUARD.md`](patches/HOME_GUARD.md) 和 [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md)。
 
 ## 最终效果
-
-实机最终行为：
 
 ```text
 开机
@@ -20,13 +49,15 @@
 
 并实现：
 
-- 遥控器 Home 键返回自定义 Launcher
+- 遥控器 Home 键稳定返回自定义 Launcher
+- Launcher 覆盖升级后 Home 接管可自行恢复
+- 完整重启后 Home 接管保持可用
 - 原厂开机广告不再完整播放
-- 广告结束后不会掉回小米原厂桌面
-- 删除天气、提醒、日历、商城、电视管家、时尚画报、小爱同学等不需要的预装 App
-- `SystemUI` 和无线投屏功能继续保留，但相关入口不出现在自定义首页
-- 支持自定义 JPG/PNG 壁纸
-- 提供稳定的 ADB 截图、前台包名识别、状态检查和恢复脚本
+- 广告结束后不会最终落回小米原厂桌面
+- 删除天气、提醒、日历、商城、电视管家、时尚画报、小爱同学等不需要的 user-0 预装 App
+- `SystemUI` 与无线投屏继续保留，但相关入口不显示在自定义首页
+- 支持 JPG/PNG 自定义壁纸
+- 提供 ADB 截图、前台包名识别、状态检查、备份和恢复工具
 
 ## 已验证设备
 
@@ -44,27 +75,35 @@
 | build | `8.8.20.1275` |
 | Launcher 包名 | `com.gathin.tvhome` |
 
-## 这个项目解决的三个特殊问题
+## 这个项目解决的四个特殊问题
 
 ### 1. 第三方 Launcher 无法成为标准 HOME
 
 这台 ROM 对 `MAIN + HOME` 做了 Xiaomi 自定义过滤。普通第三方 Launcher 即使声明 HOME，也不会像标准 Android 那样通过 chooser 成为默认桌面。
 
-因此本方案不和 Xiaomi 的 HOME resolver 硬碰，而是使用 `AccessibilityService` 接管遥控器 Home 键，并显式拉起 `com.gathin.tvhome`。
+因此方案使用 `AccessibilityService` 接管遥控器 Home 键，并显式拉起 `com.gathin.tvhome`。详见 [`patches/HOME_TAKEOVER.md`](patches/HOME_TAKEOVER.md)。
 
-### 2. 开机广告晚于 Launcher 启动
+### 2. HomeKeyService 会出现“配置还在、实际失效”
 
-实测中，自定义 Launcher 已经出现后，`com.mitv.tvhome/.BootActivity` 还会在十几秒后启动并覆盖前台。因此仅“开机拉起一次 Launcher”不够。
+这是 v1.1.0 重点解决的问题。Launcher 声明并由 ADB 一次性授予：
 
-本机最终采用开机前 45 秒内的多时间点回抢：
+```text
+android.permission.WRITE_SECURE_SETTINGS
+```
+
+随后 HomeGuard 通过应用自身的 `ContentResolver` 修复无障碍服务状态。详见 [`patches/HOME_GUARD.md`](patches/HOME_GUARD.md)。
+
+### 3. 开机广告晚于 Launcher 启动
+
+实测 `com.mitv.tvhome/.BootActivity` 会在自定义 Launcher 已出现后才启动并覆盖前台。因此本机保留开机前 45 秒内的多时间点回抢：
 
 ```text
 0.5s / 8s / 15s / 25s / 35s / 45s
 ```
 
-这套数字来自本机日志，不建议照搬到其它型号。
+这些时间点来自本机日志，不建议原样复制到其它型号。
 
-### 3. Android 6 壁纸主题会报 EACCES
+### 4. Android 6 壁纸主题读取 EACCES
 
 Launcher 从：
 
@@ -72,18 +111,19 @@ Launcher 从：
 /storage/emulated/0/Android/data/com.gathin.tvhome/files/
 ```
 
-读取 `config.json` 和 `wallpaper.jpg`，但本机应用进程最初会收到：
+读取 `config.json` / `wallpaper.jpg`，本机最初会得到：
 
 ```text
 open failed: EACCES (Permission denied)
 ```
 
-需要在 Launcher Manifest 声明 `READ_EXTERNAL_STORAGE`，安装后再用 ADB `pm grant` 授权。详见 [`patches/STORAGE_PERMISSION.md`](patches/STORAGE_PERMISSION.md)。
+需要声明并 ADB 授权 `READ_EXTERNAL_STORAGE`。详见 [`patches/STORAGE_PERMISSION.md`](patches/STORAGE_PERMISSION.md)。
 
 ## 项目结构
 
 ```text
 .
+├── VERSION
 ├── README.md
 ├── README.en.md
 ├── QUICKSTART.md
@@ -91,9 +131,10 @@ open failed: EACCES (Permission denied)
 ├── LICENSE
 ├── NOTICE.md
 ├── scripts/
-│   ├── lib.sh
 │   ├── check-device.sh
 │   ├── backup-state.sh
+│   ├── grant-launcher-permissions.sh
+│   ├── verify-homeguard.sh
 │   ├── debloat-user-apps.sh
 │   ├── restore-packages.sh
 │   ├── restore-accessibility.sh
@@ -107,12 +148,17 @@ open failed: EACCES (Permission denied)
 │   └── config.json
 ├── patches/
 │   ├── HOME_TAKEOVER.md
+│   ├── HOME_GUARD.md
 │   ├── STORAGE_PERMISSION.md
-│   └── API23_NOTES.md
+│   ├── API23_NOTES.md
+│   └── homeguard/
+│       ├── HomeGuard.java
+│       └── HomeGuardReceiver.java
 └── docs/
     ├── PACKAGE_MAP.md
     ├── TECHNICAL_NOTES.md
     ├── TESTED_STATE.md
+    ├── VALIDATION_MATRIX.md
     ├── RECOVERY.md
     ├── TROUBLESHOOTING.md
     └── UPSTREAM.md
@@ -120,26 +166,41 @@ open failed: EACCES (Permission denied)
 
 ## 快速开始
 
-先阅读 [`QUICKSTART.md`](QUICKSTART.md)。最基本的环境变量：
+先阅读 [`QUICKSTART.md`](QUICKSTART.md)。典型环境变量：
 
 ```bash
 export ADB="$HOME/Downloads/platform-tools/adb"
 export TV_HOST="192.168.1.50"
 ```
 
-检查连接和目标机：
+检查设备：
 
 ```bash
 ./scripts/check-device.sh
 ```
 
-先备份当前状态：
+先备份：
 
 ```bash
 ./scripts/backup-state.sh
 ```
 
-再进行任何删除操作。
+## Launcher 必需补丁
+
+你的 API 23 `com.gathin.tvhome` fork 至少需要：
+
+1. [`patches/HOME_TAKEOVER.md`](patches/HOME_TAKEOVER.md)
+2. [`patches/HOME_GUARD.md`](patches/HOME_GUARD.md)
+3. [`patches/STORAGE_PERMISSION.md`](patches/STORAGE_PERMISSION.md)
+4. [`patches/API23_NOTES.md`](patches/API23_NOTES.md)
+
+安装后执行一次：
+
+```bash
+./scripts/grant-launcher-permissions.sh
+```
+
+其中 `WRITE_SECURE_SETTINGS` 的 ADB grant 是本机 ROM 上验证过的设备特定行为。
 
 ## 已验证可从 user 0 移除的包
 
@@ -161,47 +222,32 @@ export TV_HOST="192.168.1.50"
 ./scripts/debloat-user-apps.sh
 ```
 
-脚本会再次检查 `matrix / API 23`，并要求输入 `YES` 才执行。
+脚本会检查 `matrix / API 23`，并要求输入 `YES`。
 
-`pm uninstall --user 0` 只针对当前用户，不会直接删除 `/system` 中的 APK。
+## 保留但隐藏
 
-## 保留但隐藏的入口
-
-这两个包**不要卸载**：
+不要卸载：
 
 ```text
 com.xiaomi.mitv.systemui
 com.xiaomi.mitv.smartshare
 ```
 
-原因：
+原因：前者不只是通知中心，后者是无线投屏功能。本项目通过 [`theme/config.json`](theme/config.json) 的 `hidden_apps` 隐藏 Launcher 入口。
 
-- `com.xiaomi.mitv.systemui` 包含通知中心，但也可能承载音量条、系统提示、输入源 UI
-- `com.xiaomi.mitv.smartshare` 是无线投屏，本项目只要求首页不显示，不要求破坏投屏能力
+## 壁纸
 
-它们通过 [`theme/config.json`](theme/config.json) 的 `hidden_apps` 从 Launcher 网格隐藏。
-
-## 自定义壁纸
-
-Launcher 完成 Android 6 存储权限补丁后：
+完成存储权限补丁后：
 
 ```bash
 ./scripts/set-wallpaper.sh /path/to/photo.jpg
 ```
 
-推荐：
-
-```text
-1920×1080
-16:9
-JPG
-```
-
-Launcher 使用 `CENTER_CROP`，所以主体不要贴近边缘。
+推荐 1920×1080 / 16:9。Launcher 使用 `CENTER_CROP`。
 
 ## 截图
 
-本机 `adb exec-out screencap -p > file.png` 曾生成无法打开的 PNG，因此项目固定采用“电视先写文件，再 pull”：
+本机 `adb exec-out screencap -p > file.png` 曾产生无法打开的文件，因此固定使用“电视先写文件，再 pull”：
 
 ```bash
 ./scripts/screenshot.sh ~/Desktop
@@ -209,27 +255,29 @@ Launcher 使用 `CENTER_CROP`，所以主体不要贴近边缘。
 
 ## 安全边界
 
-本项目刻意**没有**：
+本项目刻意不做：
 
 - root
 - remount `/system`
 - 删除原厂 `com.mitv.tvhome`
 - 卸载 `com.xiaomi.mitv.systemui`
-- 尝试绕过 uid=1000 的系统组件保护
+- 试图突破 uid=1000 系统组件状态保护
 
-原厂 HOME `com.mitv.tvhome/.MainActivityUserMode` 保留作为救援层。
+原厂 `com.mitv.tvhome/.MainActivityUserMode` 保留为救援层。
 
-## Launcher 上游
+## 关于 Launcher 源码
 
-本项目围绕 Gathin23 的开源 `cleanyourtv` Launcher 做设备适配，但不重新分发其完整源码。详情和许可证见 [`NOTICE.md`](NOTICE.md) 与 [`docs/UPSTREAM.md`](docs/UPSTREAM.md)。
+本仓库是设备适配 companion kit，不重新分发上游 Launcher 完整源码。实机使用的是一个已经完成 API23 与 Xiaomi 行为适配的本地 fork。
 
-本机使用的是一个已经适配 API 23 的本地 fork。上游后续版本可能已经变化，因此**不要假设当前 main 分支可直接在 Android 6 上编译运行**。
+为提高 v1.1.0 的可复现性，本仓库现在附带 **HomeGuard 的完整新增 Java 类**，但仍不声称对任意上游 commit 可直接无冲突应用。
 
-## 发布建议
+上游与许可证见 [`NOTICE.md`](NOTICE.md) / [`docs/UPSTREAM.md`](docs/UPSTREAM.md)。
 
-GitHub Description：
+## GitHub 发布信息
 
-> No-root clean launcher, debloat, wallpaper and ADB toolkit for Xiaomi MiTV4A 43 (matrix), Android 6.0.1 / API 23.
+Description：
+
+> No-root clean launcher, self-healing Home takeover, debloat, wallpaper and ADB toolkit for Xiaomi MiTV4A 43 (matrix), Android 6.0.1 / API 23.
 
 Topics：
 
@@ -239,4 +287,4 @@ xiaomi-tv mitv mitv4a android-tv android-6 adb launcher debloat
 
 ## License
 
-本仓库脚本和文档使用 MIT License。上游 `cleanyourtv` 同样使用 MIT License，但本仓库不包含其完整源码或字体资源。
+本仓库原创脚本与文档使用 MIT License。第三方项目版权归各自权利人所有。

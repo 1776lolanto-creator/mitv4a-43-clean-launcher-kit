@@ -1,0 +1,11 @@
+{
+  "background_color": "#000000",
+  "wallpaper": true,
+  "sky_intensity": 0,
+  "hidden_apps": [
+    "com.mediatek.wwtv.tvcenter",
+    "com.mitv.gallery",
+    "com.xiaomi.mitv.systemui",
+    "com.xiaomi.mitv.smartshare"
+  ]
+}
