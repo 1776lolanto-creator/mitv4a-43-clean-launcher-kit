@@ -1,0 +1,37 @@
+name: Bug report
+about: Report a problem on a MiTV4A 43 / matrix setup
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include Wi-Fi passwords, VPN subscription URLs, tokens, cookies, or ADB private keys."
+  - type: input
+    id: model
+    attributes:
+      label: TV model
+      placeholder: Xiaomi MiTV4A 43
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: ro.product.device
+      placeholder: matrix
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: ro.build.display.id
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: adb
+    attributes:
+      label: Relevant ADB output
+      render: shell
