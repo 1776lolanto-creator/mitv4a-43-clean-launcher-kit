@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash syntax
+        run: bash -n scripts/*.sh
+      - name: Validate JSON
+        run: python3 -m json.tool theme/config.json >/dev/null
+      - name: Reject accidental local identifiers
+        run: |
+          if grep -RInE '/Users/a1|192\.168\.31\.49' . --exclude-dir=.git --exclude=ci.yml; then
+            echo 'Found local-only identifier in publishable files.' >&2
+            exit 1
+          fi
+      - name: Required v1.1 files
+        run: |
+          test -f patches/HOME_GUARD.md
+          test -f patches/homeguard/HomeGuard.java
+          test -f patches/homeguard/HomeGuardReceiver.java
+          test -x scripts/grant-launcher-permissions.sh
+          test -x scripts/verify-homeguard.sh
